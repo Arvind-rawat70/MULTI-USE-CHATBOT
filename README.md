@@ -1,8 +1,15 @@
+
 # 🤖 LangGraph Chatbot
 
 A simple AI chatbot built using **LangGraph**, **LangChain**, **Groq**, and **Streamlit**.
 
 This project demonstrates how to create a basic conversational workflow using LangGraph with an in-memory checkpointer to maintain conversation state.
+
+<img width="1077" height="871" alt="Screenshot 2026-08-25 170908" src="https://github.com/user-attachments/assets/c21fb816-be46-4bca-8421-bf2a04cf9953" />
+
+workflow
+<img width="135" height="256" alt="Screenshot 2026-08-25 171019" src="https://github.com/user-attachments/assets/1c06a605-25ed-4d26-8000-c761c83dc4fd" />
+
 
 ## 🚀 Tech Stack
 
