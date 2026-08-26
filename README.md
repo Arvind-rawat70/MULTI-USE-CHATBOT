@@ -1,187 +1,236 @@
-
 # 🤖 LangGraph Chatbot
 
-A simple AI chatbot built using **LangGraph**, **LangChain**, **Groq**, and **Streamlit**.
+A conversational AI chatbot built using **LangGraph, LangChain, Groq, and Streamlit**.
 
-This project demonstrates how to create a basic conversational workflow using LangGraph with an in-memory checkpointer to maintain conversation state.
+This project demonstrates how to build a **stateful conversational AI application** with LangGraph, including conversation threads, checkpoint-based state management, streaming responses, and a ChatGPT-style conversation history interface.
 
-<img width="1077" height="871" alt="Screenshot 2026-08-25 170908" src="https://github.com/user-attachments/assets/c21fb816-be46-4bca-8421-bf2a04cf9953" />
+---
 
-workflow
-<img width="135" height="256" alt="Screenshot 2026-08-25 171019" src="https://github.com/user-attachments/assets/1c06a605-25ed-4d26-8000-c761c83dc4fd" />
+## 📸 Screenshots
 
+### Chat Interface
 
-## 🚀 Tech Stack
+<img width="1077" height="871" alt="Chatbot Interface" src="https://github.com/user-attachments/assets/c21fb816-be46-4bca-8421-bf2a04cf9953" />
 
-* **Python**
-* **LangGraph** – Workflow and state management
-* **LangChain** – Message handling and LLM integration
-* **Groq** – Large Language Model
-* **Streamlit** – Chatbot web interface
-* **Pydantic / TypedDict** – State definition
-* **dotenv** – Environment variable management
+### LangGraph Workflow
+
+<img width="135" height="256" alt="LangGraph Workflow" src="https://github.com/user-attachments/assets/1c06a605-25ed-4d26-8000-c761c83dc4fd" />
+
+---
+
+## 🚀 Features
+
+- 🤖 Conversational AI chatbot
+- ⚡ Streaming AI responses
+- 💬 ChatGPT-style chat interface
+- 🗂️ Multiple conversation threads
+- ➕ Create new conversations
+- 🔀 Switch between previous conversations
+- 🧵 Thread-based conversation state
+- 💾 LangGraph checkpointing
+- 🧠 Stateful conversations
+- 📋 Chat history in the sidebar
+- 🔐 Secure API key management using `.env`
+- 🎨 Streamlit frontend
+- ⚙️ LangGraph backend workflow
+- 🔗 LangChain message integration
+- 🚀 Groq LLM inference
+
+---
+
+## 🛠️ Tech Stack
+
+| Technology | Purpose |
+|---|---|
+| Python | Core programming language |
+| LangGraph | Workflow and state management |
+| LangChain | LLM and message integration |
+| Groq | LLM inference |
+| Streamlit | Web interface |
+| TypedDict | State definition |
+| `Annotated` | State update configuration |
+| `add_messages` | Conversation message management |
+| `InMemorySaver` | In-memory checkpointing |
+| python-dotenv | Environment variable management |
+
+---
 
 ## 📁 Project Structure
 
 ```text
-project/
+MULTI-USE-CHATBOT/
 │
-├── chatbot_backend.py     # LangGraph workflow and LLM logic
-├── app.py                 # Streamlit frontend
-├── .env                   # API key
-├── requirements.txt       # Python dependencies
-└── README.md              # Project documentation
-```
+├── app.py                  # Streamlit frontend
+├── chatbot_backend.py      # LangGraph workflow and LLM logic
+├── requirements.txt        # Python dependencies
+├── README.md               # Project documentation
+├── .gitignore              # Ignored files
+│
+└── .env                    # Local API key - not committed
 
-## 🔄 How It Works
 
-The chatbot follows a simple LangGraph workflow:
 
-```text
-User Input
-    ↓
-Streamlit Chat Interface
-    ↓
-HumanMessage
-    ↓
-LangGraph Workflow
-    ↓
+🧠 Application Architecture
+
+The application is divided into two main parts:
+
+
+                    USER
+                      │
+                      ↓
+            ┌──────────────────┐
+            │   Streamlit UI   │
+            │      app.py      │
+            └────────┬─────────┘
+                     │
+                     ↓
+              HumanMessage
+                     │
+                     ↓
+            ┌──────────────────┐
+            │    LangGraph     │
+            │    Workflow      │
+            └────────┬─────────┘
+                     │
+                     ↓
+                Query Node
+                     │
+                     ↓
+                 Groq LLM
+                     │
+                     ↓
+                 AIMessage
+                     │
+                     ↓
+              Stream Response
+                     │
+                     ↓
+            ┌──────────────────┐
+            │   Streamlit UI   │
+            └──────────────────┘
+
+
+🔄 LangGraph Workflow
+
+The chatbot uses a simple LangGraph workflow
+
+START
+  │
+  ↓
 Query Node
-    ↓
+  │
+  ↓
 Groq LLM
-    ↓
-AI Response
-    ↓
-Streamlit
-```
+  │
+  ↓
+END
 
-The graph contains:
 
-* **START** → Starts the workflow
-* **Query Node** → Sends the conversation to the Groq LLM
-* **END** → Finishes the workflow
+🧵 Conversation Threads
 
-## 🧠 State Management
+Every conversation is assigned a unique thread_id.
 
-The chatbot uses a TypedDict state:
+For example:
 
-```python
-class Chatbot(TypedDict):
-    message: Annotated[list[BaseMessage], add_messages]
-```
 
-`add_messages` allows new messages to be added to the existing conversation state.
+Thread A
+│
+├── User message
+├── AI response
+├── User message
+└── AI response
 
-The project also uses:
 
-```python
+Thread B
+│
+├── User message
+└── AI response
+
+
+💾 Checkpointing
+
+The current project uses:
 InMemorySaver()
-```
 
-to store the conversation state while the application is running.
 
-## 🔑 Environment Variables
+                 Checkpointer
+                      │
+          ┌───────────┼───────────┐
+          ↓           ↓           ↓
+       Thread A    Thread B    Thread C
+          │           │           │
+          ↓           ↓           ↓
+       Messages    Messages    Messages
 
-Create a `.env` file in the project directory:
 
-```env
-GROQ_API_KEY=your_groq_api_key
-```
 
-Do not upload your `.env` file or API key to GitHub.
+💬 Chat History
 
-Add this to `.gitignore`:
+The Streamlit sidebar provides a ChatGPT-style conversation history.
 
-```text
-.env
-__pycache__/
-.venv/
-```
+Instead of showing raw thread IDs such as:
 
-## 📦 Installation
+8f31c9a2
+72bd912a
 
-Clone the repository:
+the UI displays a short title generated from the conversation:
 
-```bash
-git clone <your-repository-url>
-cd <project-folder>
-```
+How can I implement streaming...
+Explain LangGraph state management
+Build a RAG chatbot...
 
-Create a virtual environment:
+Users can click a previous conversation and continue that specific thread.
 
-```bash
-python -m venv .venv
-```
 
-Activate it on Windows:
+🔗 Frontend and Backend Flow
 
-```bash
-.venv\Scripts\activate
-```
+When a user sends a message:
 
-Install dependencies:
+User enters message
+        ↓
+Streamlit receives input
+        ↓
+HumanMessage is created
+        ↓
+thread_id is attached
+        ↓
+LangGraph workflow starts
+        ↓
+Query node receives state
+        ↓
+Messages are sent to Groq
+        ↓
+Groq generates response
+        ↓
+Response is streamed
+        ↓
+Streamlit displays response
+        ↓
+Conversation state is updated
 
-```bash
-pip install -r requirements.txt
-```
 
-## ▶️ Run the Application
 
-Start the Streamlit application:
+🔮 Future Improvements
 
-```bash
-streamlit run app.py
-```
+Planned improvements include:
 
-The chatbot will open in your browser.
-
-## 💬 Example
-
-```text
-User:
-What is LangGraph?
-
-Assistant:
-LangGraph is a framework for building stateful,
-multi-step applications with LLMs.
-```
-
-## 🎯 Learning Objectives
-
-This project was created to understand:
-
-* LangGraph StateGraph
-* Nodes and edges
-* START and END
-* TypedDict state
-* `Annotated`
-* `add_messages`
-* LangChain messages
-* LLM invocation
-* LangGraph checkpointers
-* Thread IDs
-* Streamlit chat interface
-* Connecting frontend and backend
-
-## 🔮 Future Improvements
-
-Possible improvements include:
-
-* Add conversation history UI
-* Add multiple conversation threads
-* Use persistent database-based checkpointing
-* Add streaming responses
-* Add tool calling
-* Add web search
-* Add RAG capabilities
-* Deploy the application
-
-## 👨‍💻 Author
-
-**Arvind Rawat**
-
-B.Tech CSE (AI/ML)
-
----
-
-⭐ This project is part of my learning journey with **LangGraph and Generative AI**.
+ Persistent database checkpointing
+ PostgreSQL-based conversation storage
+ Better automatic conversation titles
+ Delete conversations
+ Rename conversations
+ Search conversations
+ User authentication
+ Tool calling
+ Web search
+ RAG pipeline
+ PDF document Q&A
+ Vector database integration
+ Multiple LLM providers
+ Model selection
+ Token usage tracking
+ Better error handling
+ Retry mechanisms
+ FastAPI backend
+ Dockerization
+ Production deployment
