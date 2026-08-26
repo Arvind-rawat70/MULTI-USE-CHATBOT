@@ -11,54 +11,98 @@ import os
 from langchain_groq import ChatGroq
 
 
-# Load environment variables
+# =====================================================
+# Load Environment Variables
+# =====================================================
+
 load_dotenv()
 
 groq_api_key = os.getenv("GROQ_API_KEY")
 
 
+# =====================================================
 # LLM
+# =====================================================
+
 llm = ChatGroq(
     groq_api_key=groq_api_key,
     model="openai/gpt-oss-120b"
 )
 
 
+# =====================================================
 # State
+# =====================================================
+
 class Chatbot(TypedDict):
-    message: Annotated[list[BaseMessage], add_messages]
+
+    messages: Annotated[
+        list[BaseMessage],
+        add_messages
+    ]
 
 
+# =====================================================
 # Node
+# =====================================================
+
 def query(state: Chatbot):
 
-    messages = state["message"]
+    messages = state["messages"]
+
+    print("\nMessages received by query:")
+    print(messages)
 
     response = llm.invoke(messages)
 
     return {
-        "message": [response]
+        "messages": [response]
     }
 
 
-# Create graph
+# =====================================================
+# Create Graph
+# =====================================================
+
 graph = StateGraph(Chatbot)
 
 
+# =====================================================
 # Checkpointer
+# =====================================================
+
 checkpointer = InMemorySaver()
 
 
-# Add node
-graph.add_node("query", query)
+# =====================================================
+# Add Node
+# =====================================================
+
+graph.add_node(
+    "query",
+    query
+)
 
 
-# Add edges
-graph.add_edge(START, "query")
-graph.add_edge("query", END)
+# =====================================================
+# Add Edges
+# =====================================================
+
+graph.add_edge(
+    START,
+    "query"
+)
+
+graph.add_edge(
+    "query",
+    END
+)
 
 
+# =====================================================
 # Compile
+# =====================================================
+
 workflow = graph.compile(
     checkpointer=checkpointer
 )
