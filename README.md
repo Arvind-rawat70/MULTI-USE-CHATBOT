@@ -10,7 +10,7 @@ This project demonstrates how to build a **stateful conversational AI applicatio
 
 ### Chat Interface
 
-<img width="1077" height="871" alt="Chatbot Interface" src="https://github.com/user-attachments/assets/c21fb816-be46-4bca-8421-bf2a04cf9953" />
+<img width="1865" height="923" alt="Screenshot 2026-08-30 192546" src="https://github.com/user-attachments/assets/d4dff44c-ee93-418e-b225-ab789886c09d" />
 
 ### LangGraph Workflow
 
