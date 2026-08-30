@@ -2,164 +2,34 @@ import streamlit as st
 from langchain_core.messages import HumanMessage
 import uuid
 
-from chatbot_backend import workflow
+import chatbot_backend
+import streamlit as st
+
+from langchain_core.messages import (
+    HumanMessage,
+    AIMessage,
+    ToolMessage
+)
+
+import uuid
+from chatbot_backend import workflow,retrive_all_threads
+import chatbot_backend
 
 
-# =========================================================
-# Utility Functions
-# =========================================================
+# =====================================================
+# BACKEND
+# =====================================================
 
-def generate_thread_id():
-    """
-    Generate a unique ID for every conversation.
-    """
-    return str(uuid.uuid4())
+workflow = chatbot_backend.workflow
 
-
-def add_thread(thread_id):
-    """
-    Add a thread to the conversation list
-    if it doesn't already exist.
-    """
-
-    if thread_id not in st.session_state["chat_threads"]:
-        st.session_state["chat_threads"].append(thread_id)
+retrive_all_threads = (
+    chatbot_backend.retrive_all_threads
+)
 
 
-def get_config(thread_id=None):
-    """
-    Create LangGraph configuration.
-
-    If thread_id is not provided,
-    use the currently active thread.
-    """
-
-    if thread_id is None:
-        thread_id = st.session_state["thread_id"]
-
-    return {
-        "configurable": {
-            "thread_id": thread_id
-        }
-    }
-
-
-def load_conversation(thread_id):
-    """
-    Load conversation state from LangGraph
-    using the thread_id.
-    """
-
-    config = get_config(thread_id)
-
-    state = workflow.get_state(config)
-
-    return state.values.get("messages", [])
-
-
-def generate_chat_title(thread_id):
-    """
-    Generate a short title from the first
-    HumanMessage of the conversation.
-
-    Maximum = 7 words.
-    """
-
-    try:
-
-        messages = load_conversation(thread_id)
-
-        for message in messages:
-
-            if isinstance(message, HumanMessage):
-
-                words = message.content.strip().split()
-
-                if not words:
-                    return "New Chat"
-
-                if len(words) > 7:
-                    return " ".join(words[:7]) + "..."
-
-                return " ".join(words)
-
-    except Exception:
-        pass
-
-    return "New Chat"
-
-
-def reset_chat():
-    """
-    Create a new conversation.
-    """
-
-    thread_id = generate_thread_id()
-
-    st.session_state["thread_id"] = thread_id
-
-    st.session_state["messages"] = []
-
-    add_thread(thread_id)
-
-
-def switch_chat(thread_id):
-    """
-    Switch from current conversation
-    to another conversation.
-    """
-
-    st.session_state["thread_id"] = thread_id
-
-    messages = load_conversation(thread_id)
-
-    temp_messages = []
-
-    for message in messages:
-
-        if isinstance(message, HumanMessage):
-            role = "user"
-
-        else:
-            role = "assistant"
-
-        temp_messages.append({
-            "role": role,
-            "content": message.content
-        })
-
-    st.session_state["messages"] = temp_messages
-
-
-def initialize_session():
-    """
-    Initialize Streamlit session state.
-    """
-
-    if "thread_id" not in st.session_state:
-
-        st.session_state["thread_id"] = generate_thread_id()
-
-
-    if "messages" not in st.session_state:
-
-        st.session_state["messages"] = []
-
-
-    if "chat_threads" not in st.session_state:
-
-        st.session_state["chat_threads"] = []
-
-
-    # Add current thread
-    add_thread(
-        st.session_state["thread_id"]
-    )
-
-
-# =========================================================
-# Streamlit Configuration
-# =========================================================
+# =====================================================
+# STREAMLIT CONFIG
+# =====================================================
 
 st.set_page_config(
     page_title="LangGraph Chatbot",
@@ -168,30 +38,315 @@ st.set_page_config(
 )
 
 
-# =========================================================
-# Initialize Session
-# =========================================================
+# =====================================================
+# CSS: pin the connector popover to the bottom bar,
+# next to Streamlit's floating chat_input
+# =====================================================
+
+st.markdown(
+    """
+    <style>
+    /* The popover trigger button block */
+    div[data-testid="stPopover"] {
+        position: fixed;
+        bottom: 18px;
+        left: 22rem;        /* shift right of sidebar; tweak to taste */
+        z-index: 999;
+    }
+
+    /* Push chat_input's left padding so it doesn't sit under the button */
+    div[data-testid="stChatInput"] {
+        padding-left: 3.5rem;
+    }
+
+    /* "Active: ..." caption under the popover — also pin it */
+    #connector-active-caption {
+        position: fixed;
+        bottom: -6px;
+        left: 22rem;
+        z-index: 999;
+        font-size: 0.75rem;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+
+
+# =====================================================
+# UTILITY FUNCTIONS
+# =====================================================
+
+def generate_thread_id():
+
+    return str(
+        uuid.uuid4()
+    )
+
+
+# =====================================================
+# ADD THREAD
+# =====================================================
+
+def add_thread(thread_id):
+
+    if thread_id not in st.session_state[
+        "chat_threads"
+    ]:
+
+        st.session_state[
+            "chat_threads"
+        ].append(
+            thread_id
+        )
+
+
+# =====================================================
+# CONFIG
+# =====================================================
+
+def get_config(thread_id=None):
+
+    if thread_id is None:
+
+        thread_id = st.session_state[
+            "thread_id"
+        ]
+
+    return {
+        "configurable": {
+            "thread_id": thread_id
+        }
+    }
+
+
+# =====================================================
+# LOAD CONVERSATION
+# =====================================================
+
+def load_conversation(thread_id):
+
+    config = get_config(
+        thread_id
+    )
+
+    state = workflow.get_state(
+        config
+    )
+
+    return state.values.get(
+        "messages",
+        []
+    )
+
+
+# =====================================================
+# GENERATE CHAT TITLE
+# =====================================================
+
+def generate_chat_title(thread_id):
+
+    try:
+
+        messages = load_conversation(
+            thread_id
+        )
+
+        for message in messages:
+
+            if isinstance(
+                message,
+                HumanMessage
+            ):
+
+                words = (
+                    message.content
+                    .strip()
+                    .split()
+                )
+
+                if not words:
+
+                    return "New Chat"
+
+                if len(words) > 7:
+
+                    return (
+                        " ".join(words[:7])
+                        + "..."
+                    )
+
+                return " ".join(
+                    words
+                )
+
+    except Exception:
+
+        pass
+
+    return "New Chat"
+
+
+# =====================================================
+# RESET CHAT
+# =====================================================
+
+def reset_chat():
+
+    thread_id = generate_thread_id()
+
+    st.session_state[
+        "thread_id"
+    ] = thread_id
+
+    st.session_state[
+        "messages"
+    ] = []
+
+    # Reset connectors for new chat
+    st.session_state[
+        "selected_connectors"
+    ] = []
+
+    add_thread(
+        thread_id
+    )
+
+
+# =====================================================
+# SWITCH CHAT
+# =====================================================
+
+def switch_chat(thread_id):
+
+    st.session_state[
+        "thread_id"
+    ] = thread_id
+
+    messages = load_conversation(
+        thread_id
+    )
+
+    temp_messages = []
+
+    for message in messages:
+
+        # -----------------------------------------
+        # Human message
+        # -----------------------------------------
+
+        if isinstance(
+            message,
+            HumanMessage
+        ):
+
+            temp_messages.append({
+                "role": "user",
+                "content": message.content
+            })
+
+        # -----------------------------------------
+        # AI message
+        # -----------------------------------------
+
+        elif isinstance(
+            message,
+            AIMessage
+        ):
+
+            # Don't display tool-call-only AI messages
+            if message.content:
+
+                temp_messages.append({
+                    "role": "assistant",
+                    "content": message.content
+                })
+
+        # -----------------------------------------
+        # Don't display ToolMessage
+        # -----------------------------------------
+
+        elif isinstance(
+            message,
+            ToolMessage
+        ):
+
+            continue
+
+    st.session_state[
+        "messages"
+    ] = temp_messages
+
+
+# =====================================================
+# INITIALIZE SESSION
+# =====================================================
+
+def initialize_session():
+
+    if "thread_id" not in st.session_state:
+
+        st.session_state[
+            "thread_id"
+        ] = generate_thread_id()
+
+
+    if "messages" not in st.session_state:
+
+        st.session_state[
+            "messages"
+        ] = []
+
+
+    if "chat_threads" not in st.session_state:
+
+        st.session_state[
+            "chat_threads"
+        ] = retrive_all_threads()
+
+
+    if "selected_connectors" not in st.session_state:
+
+        st.session_state[
+            "selected_connectors"
+        ] = []
+
+
+    add_thread(
+        st.session_state[
+            "thread_id"
+        ]
+    )
+
+
+# =====================================================
+# INITIALIZE
+# =====================================================
 
 initialize_session()
 
 
-# =========================================================
-# Main Title
-# =========================================================
+# =====================================================
+# TITLE
+# =====================================================
 
-st.title("🤖 LangGraph Chatbot")
-
-
-# =========================================================
-# Sidebar
-# =========================================================
-
-st.sidebar.title("💬 LangGraph Chatbot")
+st.title(
+    "🤖 LangGraph Chatbot"
+)
 
 
-# ---------------------------------------------------------
-# New Chat Button
-# ---------------------------------------------------------
+# =====================================================
+# SIDEBAR
+# =====================================================
+
+st.sidebar.title(
+    "💬 LangGraph Chatbot"
+)
+
+
+# =====================================================
+# NEW CHAT
+# =====================================================
 
 if st.sidebar.button(
     "➕ New Chat",
@@ -205,88 +360,212 @@ if st.sidebar.button(
 
 st.sidebar.divider()
 
-st.sidebar.subheader("Recent Chats")
+st.sidebar.subheader(
+    "Recent Chats"
+)
 
 
-# ---------------------------------------------------------
-# Display Chat History
-# ---------------------------------------------------------
+# =====================================================
+# CHAT HISTORY
+# =====================================================
 
-for thread_id in st.session_state["chat_threads"]:
+for thread_id in st.session_state[
+    "chat_threads"
+]:
 
-    # Generate title from first user message
-    chat_title = generate_chat_title(thread_id)
-
-
-    # Highlight current chat
-    is_current = (
-        thread_id == st.session_state["thread_id"]
+    chat_title = generate_chat_title(
+        thread_id
     )
 
+    is_current = (
+        thread_id
+        ==
+        st.session_state["thread_id"]
+    )
 
     if is_current:
 
-        button_label = f"🟢 {chat_title}"
+        button_label = (
+            f"🟢 {chat_title}"
+        )
 
     else:
 
-        button_label = f"💬 {chat_title}"
+        button_label = (
+            f"💬 {chat_title}"
+        )
 
 
-    # Chat history button
     if st.sidebar.button(
         button_label,
         key=f"chat_{thread_id}",
         use_container_width=True
     ):
 
-        switch_chat(thread_id)
+        switch_chat(
+            thread_id
+        )
 
         st.rerun()
 
 
-# =========================================================
-# Display Current Conversation
-# =========================================================
+# =====================================================
+# DISPLAY CURRENT CONVERSATION
+# =====================================================
 
-for message in st.session_state["messages"]:
+for message in st.session_state[
+    "messages"
+]:
 
-    with st.chat_message(message["role"]):
+    with st.chat_message(
+        message["role"]
+    ):
 
         st.markdown(
             message["content"]
         )
 
 
-# =========================================================
-# Chat Input
-# =========================================================
+# =====================================================
+# CONNECTOR BUTTON  (now pinned to the bottom bar via CSS above)
+# =====================================================
+
+connector_button = st.popover(
+    "➕"
+)
+
+
+with connector_button:
+
+    st.markdown(
+        "### 🔌 Connectors"
+    )
+
+    st.caption(
+        "Select tools for this conversation"
+    )
+
+
+    # ---------------------------------------------
+    # Wikipedia
+    # ---------------------------------------------
+
+    wikipedia_enabled = st.checkbox(
+        "📚 Wikipedia",
+        value=(
+            "wikipedia"
+            in st.session_state[
+                "selected_connectors"
+            ]
+        ),
+        key="wikipedia_checkbox"
+    )
+
+
+    # ---------------------------------------------
+    # Tavily
+    # ---------------------------------------------
+
+    tavily_enabled = st.checkbox(
+        "🌐 Tavily Web Search",
+        value=(
+            "tavily"
+            in st.session_state[
+                "selected_connectors"
+            ]
+        ),
+        key="tavily_checkbox"
+    )
+
+
+# =====================================================
+# UPDATE CONNECTORS
+# =====================================================
+
+selected_connectors = []
+
+
+if wikipedia_enabled:
+
+    selected_connectors.append(
+        "wikipedia"
+    )
+
+
+if tavily_enabled:
+
+    selected_connectors.append(
+        "tavily"
+    )
+
+
+st.session_state[
+    "selected_connectors"
+] = selected_connectors
+
+
+# =====================================================
+# SHOW ACTIVE CONNECTORS
+# =====================================================
+
+if selected_connectors:
+
+    names = []
+
+    if "wikipedia" in selected_connectors:
+
+        names.append(
+            "📚 Wikipedia"
+        )
+
+
+    if "tavily" in selected_connectors:
+
+        names.append(
+            "🌐 Tavily"
+        )
+
+    st.markdown(
+        f'<div id="connector-active-caption">Active: {" • ".join(names)}</div>',
+        unsafe_allow_html=True
+    )
+
+
+# =====================================================
+# CHAT INPUT
+# =====================================================
 
 user_input = st.chat_input(
     "Type your message..."
 )
 
 
-# =========================================================
-# Handle User Message
-# =========================================================
+# =====================================================
+# HANDLE USER MESSAGE
+# =====================================================
 
 if user_input:
 
-    # -----------------------------------------------------
-    # Display User Message
-    # -----------------------------------------------------
+    # ---------------------------------------------
+    # Display user message
+    # ---------------------------------------------
 
-    with st.chat_message("user"):
+    with st.chat_message(
+        "user"
+    ):
 
-        st.markdown(user_input)
+        st.markdown(
+            user_input
+        )
 
 
-    # -----------------------------------------------------
-    # Save User Message in Streamlit State
-    # -----------------------------------------------------
+    # ---------------------------------------------
+    # Save in Streamlit state
+    # ---------------------------------------------
 
-    st.session_state["messages"].append({
+    st.session_state[
+        "messages"
+    ].append({
 
         "role": "user",
 
@@ -295,68 +574,96 @@ if user_input:
     })
 
 
-    # -----------------------------------------------------
-    # LangGraph Configuration
-    # -----------------------------------------------------
+    # ---------------------------------------------
+    # LangGraph config
+    # ---------------------------------------------
 
     config = get_config()
 
 
-    # -----------------------------------------------------
-    # Stream Assistant Response
-    # -----------------------------------------------------
+    # ---------------------------------------------
+    # Assistant response
+    # ---------------------------------------------
 
-    with st.chat_message("assistant"):
+    with st.chat_message(
+        "assistant"
+    ):
 
         response_container = st.empty()
 
         full_response = ""
 
 
-        # ---------------------------------------------
-        # Stream response from LangGraph
-        # ---------------------------------------------
+        # -----------------------------------------
+        # STREAM
+        # -----------------------------------------
 
-        for message_chunk, metadata in workflow.stream(
+        try:
 
-            {
-                "messages": [
-                    HumanMessage(
-                        content=user_input
+            for message_chunk, metadata in workflow.stream(
+
+                {
+                    "messages": [
+                        HumanMessage(
+                            content=user_input
+                        )
+                    ],
+
+                    "selected_connectors":
+                        st.session_state[
+                            "selected_connectors"
+                        ]
+                },
+
+                config=config,
+
+                stream_mode="messages"
+            ):
+
+                # -------------------------------------
+                # Only collect text from AI messages.
+                # ToolMessage chunks carry the raw tool
+                # output (e.g. Tavily's JSON) and must
+                # NOT be shown to the user directly.
+                # -------------------------------------
+
+                if (
+                    isinstance(message_chunk, AIMessage)
+                    and message_chunk.content
+                ):
+
+                    full_response += (
+                        message_chunk.content
                     )
-                ]
-            },
 
-            config=config,
+                    response_container.markdown(
+                        full_response
+                    )
 
-            stream_mode="messages"
-        ):
+        except Exception as e:
 
-            # -----------------------------------------
-            # Check if chunk contains content
-            # -----------------------------------------
+            full_response = (
+                "⚠️ Something went wrong while "
+                "generating a response (the model may "
+                "have tried to use a tool that isn't "
+                "enabled). Try enabling a relevant "
+                "connector above, or rephrase your "
+                "question.\n\n"
+                f"`{type(e).__name__}: {e}`"
+            )
 
-            if message_chunk.content:
-
-                full_response += (
-                    message_chunk.content
-                )
-
-
-                # -------------------------------------
-                # Update UI
-                # -------------------------------------
-
-                response_container.markdown(
-                    full_response
-                )
+            response_container.markdown(
+                full_response
+            )
 
 
-    # -----------------------------------------------------
-    # Save Assistant Response
-    # -----------------------------------------------------
+    # ---------------------------------------------
+    # Save assistant response
+    # ---------------------------------------------
 
-    st.session_state["messages"].append({
+    st.session_state[
+        "messages"
+    ].append({
 
         "role": "assistant",
 
@@ -364,9 +671,8 @@ if user_input:
 
     })
 
-
-    # -----------------------------------------------------
-    # Refresh UI
-    # -----------------------------------------------------
+    # ---------------------------------------------
+    # Refresh
+    # ---------------------------------------------
 
     st.rerun()
