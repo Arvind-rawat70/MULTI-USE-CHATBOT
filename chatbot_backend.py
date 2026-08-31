@@ -1,8 +1,9 @@
 from langgraph.graph import START, END, StateGraph
 from typing import TypedDict, Annotated, Literal
 
-from langchain_core.messages import BaseMessage, SystemMessage
+from langchain_core.messages import BaseMessage, SystemMessage, trim_messages
 from langchain_core.tools import tool
+from langchain_core.runnables import RunnableConfig
 from langgraph.graph.message import add_messages
 
 from langgraph.checkpoint.sqlite import SqliteSaver
@@ -10,6 +11,11 @@ from langgraph.prebuilt import ToolNode
 
 from langchain_community.utilities import WikipediaAPIWrapper
 from langchain_tavily import TavilySearch
+
+from langchain_community.document_loaders import PyPDFLoader
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_community.vectorstores import FAISS
+from langchain_huggingface import HuggingFaceEmbeddings
 
 from langchain_groq import ChatGroq
 
@@ -91,10 +97,152 @@ def wikipedia_search(query: str) -> str:
 # =====================================================
 
 web_search = TavilySearch(
-    max_results=5,
-    time_range="day",       # bias toward pages indexed/updated in the last day
-    search_depth="advanced"
+    max_results=3,
+    time_range="day",
+    search_depth="basic"
 )
+
+
+# =====================================================
+# RAG: EMBEDDINGS MODEL
+# =====================================================
+# Groq doesn't serve embedding models, so we use a small
+# local sentence-transformers model - no extra API key,
+# runs on CPU fine for this use case.
+
+embeddings = HuggingFaceEmbeddings(
+    model_name="sentence-transformers/all-MiniLM-L6-v2"
+)
+
+
+# =====================================================
+# RAG: PER-THREAD VECTOR STORE REGISTRY
+# =====================================================
+# Scoped per conversation: each thread_id gets its own
+# in-memory FAISS index of whatever PDF(s) were uploaded
+# to that conversation. Cleared when the thread is reset
+# by the frontend (see reset_chat() in app.py).
+
+RAG_RETRIEVERS: dict[str, object] = {}
+
+
+def ingest_pdf_for_thread(
+    thread_id: str,
+    pdf_path: str,
+    chunk_size: int = 1000,
+    chunk_overlap: int = 150,
+):
+    """
+    Load a PDF, split it into overlapping chunks, embed
+    them, and store/replace the retriever for this thread.
+    Call this from the frontend right after a file upload.
+    """
+
+    # -----------------------------------------
+    # 1) LOAD
+    # -----------------------------------------
+
+    loader = PyPDFLoader(pdf_path)
+
+    documents = loader.load()
+
+    print(f"\n[rag] loaded {len(documents)} page(s) from {pdf_path}")
+
+    # -----------------------------------------
+    # 2) CHUNK
+    # -----------------------------------------
+
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=chunk_size,
+        chunk_overlap=chunk_overlap,
+    )
+
+    chunks = splitter.split_documents(documents)
+
+    print(f"[rag] split into {len(chunks)} chunk(s)")
+
+    if not chunks:
+        raise ValueError(
+            "No extractable text found in this PDF "
+            "(it may be a scanned/image-only document)."
+        )
+
+    # -----------------------------------------
+    # 3) EMBED + STORE
+    # -----------------------------------------
+    # If this thread already has a store, ADD to it so
+    # multiple uploads in the same conversation accumulate
+    # instead of overwriting each other.
+
+    existing = RAG_RETRIEVERS.get(thread_id)
+
+    if existing is not None:
+
+        existing_vectorstore = existing["vectorstore"]
+        existing_vectorstore.add_documents(chunks)
+        vectorstore = existing_vectorstore
+
+    else:
+
+        vectorstore = FAISS.from_documents(
+            chunks,
+            embeddings,
+        )
+
+    RAG_RETRIEVERS[thread_id] = {
+        "vectorstore": vectorstore,
+        "retriever": vectorstore.as_retriever(
+            search_kwargs={"k": 4}
+        ),
+    }
+
+    print(f"[rag] vector store ready for thread {thread_id}")
+
+
+def clear_rag_for_thread(thread_id: str):
+
+    RAG_RETRIEVERS.pop(thread_id, None)
+
+
+@tool
+def rag_search(query: str, config: RunnableConfig) -> str:
+    """
+    Search the PDF document(s) the user has uploaded to
+    this conversation. Use this whenever the question is
+    about the content, facts, or details of an uploaded
+    document - not for general knowledge or live data.
+    """
+
+    thread_id = config.get(
+        "configurable", {}
+    ).get("thread_id")
+
+    entry = RAG_RETRIEVERS.get(thread_id)
+
+    if entry is None:
+
+        return (
+            "No documents have been uploaded to this "
+            "conversation yet. Ask the user to upload a "
+            "PDF first."
+        )
+
+    retriever = entry["retriever"]
+
+    results = retriever.invoke(query)
+
+    print(f"\n[rag_search] query: {query}")
+    print(f"[rag_search] retrieved {len(results)} chunk(s)")
+
+    if not results:
+        return "No relevant passages found in the uploaded document(s) for this query."
+
+    formatted = "\n\n---\n\n".join(
+        f"(page {d.metadata.get('page', '?')})\n{d.page_content}"
+        for d in results
+    )
+
+    return formatted
 
 
 # =====================================================
@@ -103,8 +251,42 @@ web_search = TavilySearch(
 
 tools = [
     wikipedia_search,
-    web_search
+    web_search,
+    rag_search,
 ]
+
+
+# =====================================================
+# TOKEN BUDGET
+# =====================================================
+# Groq's on-demand tier caps gpt-oss-120b at 8000 TPM.
+# Long threads accumulate raw ToolMessage search results
+# forever via the checkpointer, so we trim history before
+# every LLM call rather than sending the whole thread.
+
+MAX_HISTORY_TOKENS = 4000
+
+
+def _approx_token_counter(msgs: list[BaseMessage]) -> int:
+    # Cheap approximation (~4 chars/token) - good enough
+    # for a trimming budget, doesn't need to be exact.
+    total_chars = sum(
+        len(str(m.content)) for m in msgs
+    )
+    return total_chars // 4
+
+
+def trim_history(messages: list[BaseMessage]) -> list[BaseMessage]:
+
+    return trim_messages(
+        messages,
+        max_tokens=MAX_HISTORY_TOKENS,
+        token_counter=_approx_token_counter,
+        strategy="last",
+        start_on="human",
+        include_system=False,
+        allow_partial=False,
+    )
 
 
 # =====================================================
@@ -113,7 +295,9 @@ tools = [
 
 def query(state: Chatbot):
 
-    messages = state["messages"]
+    messages = trim_history(
+        state["messages"]
+    )
 
     selected_connectors = state.get(
         "selected_connectors",
@@ -141,6 +325,12 @@ def query(state: Chatbot):
 
         selected_tools.append(
             web_search
+        )
+
+    if "rag" in selected_connectors:
+
+        selected_tools.append(
+            rag_search
         )
 
     # ---------------------------------------------
@@ -189,6 +379,18 @@ def query(state: Chatbot):
                 "to get the freshest result, and prefer the "
                 "most recently published source among the "
                 "results."
+            )
+
+        if "rag_search" in [t.name for t in selected_tools]:
+            tool_capabilities.append(
+                "- rag_search: searches PDF document(s) the "
+                "user has uploaded to THIS conversation. Use "
+                "it for any question about the content of "
+                "an uploaded document. Do not use "
+                "web_search or wikipedia_search for that - "
+                "and do not use rag_search for general "
+                "knowledge or live/current-events questions "
+                "unrelated to the uploaded document."
             )
 
         system_instruction = SystemMessage(
@@ -262,7 +464,9 @@ def condition(
 
 def chatbot(state: Chatbot):
 
-    messages = state["messages"]
+    messages = trim_history(
+        state["messages"]
+    )
 
     response = llm.invoke(
         messages

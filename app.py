@@ -1,7 +1,9 @@
-import streamlit as st
-from langchain_core.messages import HumanMessage
-import uuid
+import os
+import tempfile
 
+import uuid
+from chatbot_backend import workflow,retrive_all_threads
+from langchain_core.messages import HumanMessage
 import chatbot_backend
 import streamlit as st
 
@@ -10,10 +12,6 @@ from langchain_core.messages import (
     AIMessage,
     ToolMessage
 )
-
-import uuid
-from chatbot_backend import workflow,retrive_all_threads
-import chatbot_backend
 
 
 # =====================================================
@@ -208,6 +206,12 @@ def reset_chat():
         "selected_connectors"
     ] = []
 
+    # Drop any RAG vector store tied to the OLD thread
+    # (new chat = new thread_id = no uploaded doc context)
+    st.session_state[
+        "rag_uploaded_filenames"
+    ] = []
+
     add_thread(
         thread_id
     )
@@ -309,6 +313,13 @@ def initialize_session():
 
         st.session_state[
             "selected_connectors"
+        ] = []
+
+
+    if "rag_uploaded_filenames" not in st.session_state:
+
+        st.session_state[
+            "rag_uploaded_filenames"
         ] = []
 
 
@@ -478,6 +489,90 @@ with connector_button:
     )
 
 
+    # ---------------------------------------------
+    # RAG (uploaded PDFs)
+    # ---------------------------------------------
+
+    rag_enabled = st.checkbox(
+        "📄 My Documents (RAG)",
+        value=(
+            "rag"
+            in st.session_state[
+                "selected_connectors"
+            ]
+        ),
+        key="rag_checkbox"
+    )
+
+    uploaded_pdf = st.file_uploader(
+        "Upload a PDF to search",
+        type=["pdf"],
+        key="rag_pdf_uploader"
+    )
+
+    if uploaded_pdf is not None:
+
+        already_ingested = (
+            uploaded_pdf.name
+            in st.session_state["rag_uploaded_filenames"]
+        )
+
+        if not already_ingested:
+
+            with st.spinner(
+                f"Reading {uploaded_pdf.name}..."
+            ):
+
+                # Save to a temp file - PyPDFLoader needs
+                # a real path, not an in-memory buffer.
+                with tempfile.NamedTemporaryFile(
+                    delete=False,
+                    suffix=".pdf"
+                ) as tmp_file:
+
+                    tmp_file.write(
+                        uploaded_pdf.getvalue()
+                    )
+
+                    tmp_path = tmp_file.name
+
+                try:
+
+                    chatbot_backend.ingest_pdf_for_thread(
+                        thread_id=st.session_state[
+                            "thread_id"
+                        ],
+                        pdf_path=tmp_path,
+                    )
+
+                    st.session_state[
+                        "rag_uploaded_filenames"
+                    ].append(uploaded_pdf.name)
+
+                    st.success(
+                        f"✅ {uploaded_pdf.name} indexed"
+                    )
+
+                except Exception as e:
+
+                    st.error(
+                        f"Failed to read {uploaded_pdf.name}: {e}"
+                    )
+
+                finally:
+
+                    os.unlink(tmp_path)
+
+    if st.session_state["rag_uploaded_filenames"]:
+
+        st.caption(
+            "Indexed: "
+            + ", ".join(
+                st.session_state["rag_uploaded_filenames"]
+            )
+        )
+
+
 # =====================================================
 # UPDATE CONNECTORS
 # =====================================================
@@ -496,6 +591,13 @@ if tavily_enabled:
 
     selected_connectors.append(
         "tavily"
+    )
+
+
+if rag_enabled:
+
+    selected_connectors.append(
+        "rag"
     )
 
 
@@ -523,6 +625,13 @@ if selected_connectors:
 
         names.append(
             "🌐 Tavily"
+        )
+
+
+    if "rag" in selected_connectors:
+
+        names.append(
+            "📄 My Documents"
         )
 
     st.markdown(
@@ -671,8 +780,11 @@ if user_input:
 
     })
 
+
     # ---------------------------------------------
     # Refresh
     # ---------------------------------------------
 
     st.rerun()
+
+
