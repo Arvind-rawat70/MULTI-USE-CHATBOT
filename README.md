@@ -9,13 +9,7 @@ This project demonstrates how to build a **stateful, tool-using conversational A
 ## 📸 Screenshots
 
 ### Chat Interface
-
-<img width="1865" height="923" alt="Screenshot 2026-08-30 192546" src="https://github.com/user-attachments/assets/d4dff44c-ee93-418e-b225-ab789886c09d" />
-
-### LangGraph Workflow
-
-<img width="135" height="256" alt="LangGraph Workflow" src="https://github.com/user-attachments/assets/1c06a605-25ed-4d26-8000-c761c83dc4fd" />
-
+<img width="1855" height="922" alt="image" src="https://github.com/user-attachments/assets/1e55b2e6-fd1c-40b6-85cd-eb3eb07834e9" />
 ---
 
 ## 🚀 Features
