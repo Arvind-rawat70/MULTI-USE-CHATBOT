@@ -33,23 +33,32 @@ from datetime import date
 load_dotenv()
 
 groq_api_key = os.getenv("GROQ_API_KEY")
-
-# Sanity check: fail loudly instead of silently misbehaving
+# Sanity check: if missing, warn but provide a dummy LLM
 if not groq_api_key:
-    raise ValueError("GROQ_API_KEY not found in environment / .env")
+    print("WARNING: GROQ_API_KEY not found in environment / .env — running in degraded mode.")
+    class _DummyLLM:
+        def bind_tools(self, tools):
+            return self
 
-if not os.getenv("TAVILY_API_KEY"):
-    print("WARNING: TAVILY_API_KEY not set — Tavily search will fail at call time.")
+        def invoke(self, *args, **kwargs):
+            raise RuntimeError(
+                "GROQ_API_KEY not set. Set it in your environment or .env to enable the real model."
+            )
+
+    llm = _DummyLLM()
+else:
+    if not os.getenv("TAVILY_API_KEY"):
+        print("WARNING: TAVILY_API_KEY not set — Tavily search will fail at call time.")
 
 
-# =====================================================
-# LLM
-# =====================================================
+    # =====================================================
+    # LLM
+    # =====================================================
 
-llm = ChatGroq(
-    groq_api_key=groq_api_key,
-    model="openai/gpt-oss-120b"
-)
+    llm = ChatGroq(
+        groq_api_key=groq_api_key,
+        model="openai/gpt-oss-120b"
+    )
 
 
 # =====================================================
@@ -248,6 +257,10 @@ def rag_search(query: str, config: RunnableConfig) -> str:
 # =====================================================
 # ALL TOOLS
 # =====================================================
+# All three tools are registered with the ToolNode so any
+# of them can actually be executed once the LLM decides to
+# call one. Whether each one is *offered* to the LLM at a
+# given turn is decided separately in query(), below.
 
 tools = [
     wikipedia_search,
@@ -290,6 +303,88 @@ def trim_history(messages: list[BaseMessage]) -> list[BaseMessage]:
 
 
 # =====================================================
+# HELPER: build the tool list + system instruction
+# =====================================================
+# Shared by both query() and chatbot() so the "which
+# tools are offered right now" logic (and the prompt that
+# explains them to the model) lives in exactly one place
+# instead of drifting out of sync between the two nodes.
+
+def _select_tools_and_system_message(
+    selected_connectors: list[str],
+):
+
+    selected_tools = [
+        wikipedia_search,
+        web_search,
+    ]
+
+    if "rag" in selected_connectors:
+
+        selected_tools.append(
+            rag_search
+        )
+
+    tool_capabilities = [
+        "- wikipedia_search: static encyclopedic "
+        "facts (history, biographies, definitions, "
+        "science, places). Cannot get live/current "
+        "data.",
+
+        "- web_search: a LIVE web search engine. "
+        "It CAN and SHOULD be used for current "
+        "prices (crypto, stocks, currency exchange "
+        "rates), weather, news, sports scores, and "
+        "any other real-time or recent information. "
+        "Include today's date in your search query "
+        "(e.g. 'Bitcoin price today "
+        f"{date.today().isoformat()}') "
+        "to get the freshest result, and prefer the "
+        "most recently published source among the "
+        "results.",
+    ]
+
+    if "rag_search" in [t.name for t in selected_tools]:
+        tool_capabilities.append(
+            "- rag_search: searches PDF document(s) the "
+            "user has uploaded to THIS conversation. Use "
+            "it for any question about the content of "
+            "an uploaded document. Do not use "
+            "web_search or wikipedia_search for that - "
+            "and do not use rag_search for general "
+            "knowledge or live/current-events questions "
+            "unrelated to the uploaded document."
+        )
+
+    system_instruction = SystemMessage(
+        content=(
+            "You have access to ONLY these tools:\n"
+            + "\n".join(tool_capabilities) +
+            "\n\nFirst decide whether this question actually "
+            "needs one of these tools. If you already know "
+            "the answer confidently and it isn't live/current "
+            "or document-specific information, just answer "
+            "directly in plain text - do NOT call a tool "
+            "just because one is available.\n\n"
+            "If a question needs live/current information or "
+            "information from an uploaded document, and a "
+            "capable tool is listed above, you MUST call it - "
+            "do not answer from memory and do not claim you "
+            "lack real-time access when such a tool is "
+            "available. Only decline to call a tool if none "
+            "of the tools listed above are actually capable "
+            "of answering the question (for example, only "
+            "wikipedia_search is available and the question "
+            "needs a live price) - in that case, say so "
+            "plainly instead of guessing.\n\n"
+            "Do not call any tool that is not in this list."
+        )
+    )
+
+    return selected_tools, system_instruction
+
+
+# =====================================================
 # QUERY NODE
 # =====================================================
 
@@ -310,118 +405,39 @@ def query(state: Chatbot):
     print("================================")
 
     # ---------------------------------------------
-    # Select tools according to frontend
+    # Tool selection
     # ---------------------------------------------
+    # wikipedia_search and web_search are ALWAYS offered
+    # to the LLM. There is no connector gate for them any
+    # more - the model itself decides, per turn, whether
+    # the question needs a lookup at all, and if so which
+    # of the two tools fits (static/encyclopedic vs. live
+    # web data). If neither is needed it just answers in
+    # plain text and the graph routes straight to END.
+    #
+    # rag_search is now the ONE connector-gated tool: it's
+    # only offered when the frontend says a PDF has been
+    # uploaded / enabled for this thread (i.e. "rag" is in
+    # selected_connectors). There's no point exposing it
+    # otherwise - it would just tell the model "no
+    # documents uploaded".
 
-    selected_tools = []
-
-    if "wikipedia" in selected_connectors:
-
-        selected_tools.append(
-            wikipedia_search
-        )
-
-    if "tavily" in selected_connectors:
-
-        selected_tools.append(
-            web_search
-        )
-
-    if "rag" in selected_connectors:
-
-        selected_tools.append(
-            rag_search
-        )
+    selected_tools, system_instruction = _select_tools_and_system_message(
+        selected_connectors
+    )
 
     # ---------------------------------------------
-    # If connectors are selected
-    # bind them to LLM
+    # Bind tools to LLM
     # ---------------------------------------------
 
-    if selected_tools:
+    llm_to_use = llm.bind_tools(
+        selected_tools
+    )
 
-        llm_to_use = llm.bind_tools(
-            selected_tools
-        )
-
-        # -----------------------------------------
-        # gpt-oss-120b will happily hedge in plain
-        # text ("I can't access live data...")
-        # instead of calling a bound tool unless
-        # explicitly told the tool exists to be used.
-        # Prepend a system instruction every turn.
-        # -----------------------------------------
-
-        tool_names = ", ".join(
-            t.name for t in selected_tools
-        )
-
-        tool_capabilities = []
-
-        if "wikipedia_search" in [t.name for t in selected_tools]:
-            tool_capabilities.append(
-                "- wikipedia_search: static encyclopedic "
-                "facts (history, biographies, definitions, "
-                "science, places). Cannot get live/current "
-                "data."
-            )
-
-        if "web_search" in [t.name for t in selected_tools]:
-            tool_capabilities.append(
-                "- web_search: a LIVE web search engine. "
-                "It CAN and SHOULD be used for current "
-                "prices (crypto, stocks, currency exchange "
-                "rates), weather, news, sports scores, and "
-                "any other real-time or recent information. "
-                "Include today's date in your search query "
-                "(e.g. 'Bitcoin price today "
-                f"{date.today().isoformat()}') "
-                "to get the freshest result, and prefer the "
-                "most recently published source among the "
-                "results."
-            )
-
-        if "rag_search" in [t.name for t in selected_tools]:
-            tool_capabilities.append(
-                "- rag_search: searches PDF document(s) the "
-                "user has uploaded to THIS conversation. Use "
-                "it for any question about the content of "
-                "an uploaded document. Do not use "
-                "web_search or wikipedia_search for that - "
-                "and do not use rag_search for general "
-                "knowledge or live/current-events questions "
-                "unrelated to the uploaded document."
-            )
-
-        system_instruction = SystemMessage(
-            content=(
-                "You have access to ONLY these tools:\n"
-                + "\n".join(tool_capabilities) +
-                "\n\nDo not call any tool that is not in "
-                "this list. If a question needs live/"
-                "current information and a capable tool "
-                "is listed above, you MUST call it - do "
-                "not answer from memory and do not claim "
-                "you lack real-time access when such a "
-                "tool is available. Only decline to call "
-                "a tool if none of the tools listed above "
-                "are actually capable of answering the "
-                "question (for example, only wikipedia_"
-                "search is available and the question "
-                "needs a live price) - in that case, say "
-                "so plainly instead of guessing."
-            )
-        )
-
-        invoke_messages = [system_instruction] + messages
-
-    else:
-
-        llm_to_use = llm
-        invoke_messages = messages
+    invoke_messages = [system_instruction] + messages
 
     # ---------------------------------------------
-    # LLM decides whether tool is needed
+    # LLM decides whether a tool is needed
     # ---------------------------------------------
 
     response = llm_to_use.invoke(
@@ -461,6 +477,27 @@ def condition(
 # (only reached AFTER tools have run, to synthesize
 # a final answer from the tool results)
 # =====================================================
+#
+# FIX: this node used to call the raw `llm` with no tools
+# bound at all. Since no `tools` param was sent to Groq,
+# tool_choice was implicitly "none" on this request - but
+# gpt-oss-120b can still try to emit another tool call
+# after seeing a prior tool_calls turn in the message
+# history, and Groq's API then hard-rejects the response
+# with:
+#
+#   APIError: Tool choice is none, but model called a tool
+#
+# which is exactly the error from "today price of gold in
+# india" (a web_search call happened, then this node blew
+# up trying to synthesize the final answer).
+#
+# Binding the same tool list here fixes it: the model is
+# now actually allowed to call a tool if it wants to, so
+# there's no tool_choice="none" vs. tool_call mismatch for
+# Groq to reject. It's routed back through `condition` so
+# a genuine follow-up tool call (e.g. it wants one more
+# search) is executed instead of silently dropped.
 
 def chatbot(state: Chatbot):
 
@@ -468,9 +505,28 @@ def chatbot(state: Chatbot):
         state["messages"]
     )
 
-    response = llm.invoke(
-        messages
+    selected_connectors = state.get(
+        "selected_connectors",
+        []
     )
+
+    selected_tools, system_instruction = _select_tools_and_system_message(
+        selected_connectors
+    )
+
+    llm_to_use = llm.bind_tools(
+        selected_tools
+    )
+
+    invoke_messages = [system_instruction] + messages
+
+    response = llm_to_use.invoke(
+        invoke_messages
+    )
+
+    print("\nChatbot node response:")
+    print(response)
+    print("tool_calls:", getattr(response, "tool_calls", None))
 
     return {
         "messages": [response]
@@ -530,8 +586,8 @@ graph.add_conditional_edges(
     condition,
     {
         "tools": "tools",
-        "chatbot": END          # <-- FIX: no tool needed -> query's answer IS final,
-                                  #     don't regenerate it via the chatbot node
+        "chatbot": END          # no tool needed -> query's answer IS final,
+                                  # don't regenerate it via the chatbot node
     }
 )
 
@@ -542,9 +598,20 @@ graph.add_edge(
 )
 
 
-graph.add_edge(
+# FIX: chatbot can now itself request another tool call
+# (e.g. it decided one search wasn't enough), so route it
+# back through the same condition() instead of forcing END
+# unconditionally. This also protects against infinite
+# loops in a well-behaved model since it will eventually
+# stop calling tools and land on "chatbot" -> END.
+
+graph.add_conditional_edges(
     "chatbot",
-    END
+    condition,
+    {
+        "tools": "tools",
+        "chatbot": END
+    }
 )
 
 

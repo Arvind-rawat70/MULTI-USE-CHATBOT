@@ -1,11 +1,10 @@
-import os
-import tempfile
-
 import uuid
 from chatbot_backend import workflow,retrive_all_threads
 from langchain_core.messages import HumanMessage
 import chatbot_backend
 import streamlit as st
+import os
+import tempfile
 
 from langchain_core.messages import (
     HumanMessage,
@@ -440,6 +439,14 @@ for message in st.session_state[
 # =====================================================
 # CONNECTOR BUTTON  (now pinned to the bottom bar via CSS above)
 # =====================================================
+# Wikipedia and Tavily web search are always available to
+# the model now - it decides on its own, per question,
+# whether it needs to look something up and which of the
+# two fits. There's nothing to toggle for them anymore.
+#
+# RAG (uploaded documents) is the one remaining connector,
+# since it only makes sense to offer it once a PDF has
+# actually been uploaded to this thread.
 
 connector_button = st.popover(
     "➕"
@@ -449,43 +456,14 @@ connector_button = st.popover(
 with connector_button:
 
     st.markdown(
-        "### 🔌 Connectors"
+        "### 🔌 Documents"
     )
 
     st.caption(
-        "Select tools for this conversation"
-    )
-
-
-    # ---------------------------------------------
-    # Wikipedia
-    # ---------------------------------------------
-
-    wikipedia_enabled = st.checkbox(
-        "📚 Wikipedia",
-        value=(
-            "wikipedia"
-            in st.session_state[
-                "selected_connectors"
-            ]
-        ),
-        key="wikipedia_checkbox"
-    )
-
-
-    # ---------------------------------------------
-    # Tavily
-    # ---------------------------------------------
-
-    tavily_enabled = st.checkbox(
-        "🌐 Tavily Web Search",
-        value=(
-            "tavily"
-            in st.session_state[
-                "selected_connectors"
-            ]
-        ),
-        key="tavily_checkbox"
+        "📚 Wikipedia and 🌐 Web Search are always on — "
+        "the assistant decides when it needs to look "
+        "something up. Upload a PDF below to let it search "
+        "your document too."
     )
 
 
@@ -576,22 +554,11 @@ with connector_button:
 # =====================================================
 # UPDATE CONNECTORS
 # =====================================================
+# Only RAG is a real "connector" now - wikipedia/tavily
+# are unconditionally offered by the backend, so there's
+# nothing to append for them here.
 
 selected_connectors = []
-
-
-if wikipedia_enabled:
-
-    selected_connectors.append(
-        "wikipedia"
-    )
-
-
-if tavily_enabled:
-
-    selected_connectors.append(
-        "tavily"
-    )
 
 
 if rag_enabled:
@@ -610,34 +577,21 @@ st.session_state[
 # SHOW ACTIVE CONNECTORS
 # =====================================================
 
-if selected_connectors:
+names = [
+    "📚 Wikipedia",
+    "🌐 Web Search",
+]
 
-    names = []
+if "rag" in selected_connectors:
 
-    if "wikipedia" in selected_connectors:
-
-        names.append(
-            "📚 Wikipedia"
-        )
-
-
-    if "tavily" in selected_connectors:
-
-        names.append(
-            "🌐 Tavily"
-        )
-
-
-    if "rag" in selected_connectors:
-
-        names.append(
-            "📄 My Documents"
-        )
-
-    st.markdown(
-        f'<div id="connector-active-caption">Active: {" • ".join(names)}</div>',
-        unsafe_allow_html=True
+    names.append(
+        "📄 My Documents"
     )
+
+st.markdown(
+    f'<div id="connector-active-caption">Active: {" • ".join(names)}</div>',
+    unsafe_allow_html=True
+)
 
 
 # =====================================================
@@ -755,8 +709,8 @@ if user_input:
                 "⚠️ Something went wrong while "
                 "generating a response (the model may "
                 "have tried to use a tool that isn't "
-                "enabled). Try enabling a relevant "
-                "connector above, or rephrase your "
+                "enabled). Try uploading a relevant "
+                "document above, or rephrase your "
                 "question.\n\n"
                 f"`{type(e).__name__}: {e}`"
             )
@@ -786,5 +740,3 @@ if user_input:
     # ---------------------------------------------
 
     st.rerun()
-
-
